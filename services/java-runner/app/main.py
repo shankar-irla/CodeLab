@@ -23,7 +23,9 @@ from pydantic import BaseModel, Field
 app = FastAPI(title="CodeLab Java Runner", version="0.1.0")
 local_logger = logging.getLogger("codelab.local-runtime")
 JAVA_IMAGE = os.getenv("JAVA_IMAGE", "codelab-java:25")
-JAVA_EXECUTION_MODE = os.getenv("JAVA_EXECUTION_MODE", "docker").strip().lower()
+DEFAULT_EXECUTION_MODE = "vercel-sandbox" if os.getenv("VERCEL") else "docker"
+JAVA_EXECUTION_MODE = os.getenv("JAVA_EXECUTION_MODE", DEFAULT_EXECUTION_MODE).strip().lower()
+JAVA_SANDBOX_IMAGE = os.getenv("JAVA_SANDBOX_IMAGE", "codelab-java:latest").strip() or "codelab-java:latest"
 DEFAULT_TIMEOUT = float(os.getenv("EXECUTION_TIMEOUT_SECONDS", "5"))
 MEMORY_LIMIT = os.getenv("EXECUTION_MEMORY_LIMIT", "256m")
 CPU_LIMIT = float(os.getenv("EXECUTION_CPU_LIMIT", "1.0"))
@@ -551,10 +553,211 @@ class LocalJavaRuntime:
         return _parse_diagnostics(output)
 
 
-if JAVA_EXECUTION_MODE not in {"docker", "local"}:
-    raise RuntimeError("JAVA_EXECUTION_MODE must be either 'docker' or 'local'.")
+def _sandbox_name(job_id: str) -> str:
+    return f"codelab-{job_id}"
 
-java_runtime: LanguageRuntime = LocalJavaRuntime() if JAVA_EXECUTION_MODE == "local" else JavaRuntime()
+
+active_sandbox_boxes: dict[str, object] = {}
+active_sandbox_processes: dict[str, object] = {}
+sandbox_version_cache: dict[str, object] = {"expires_at": 0.0, "value": None}
+
+
+class VercelSandboxJavaRuntime:
+    """Runs each public Java submission in its own network-disabled Vercel microVM."""
+
+    @staticmethod
+    def _sdk():
+        try:
+            from vercel import sandbox
+            from vercel.sandbox import NetworkPolicy, SandboxResources
+        except ImportError as exc:
+            raise HTTPException(status_code=503, detail="Install the Vercel Python SDK to enable Java execution.") from exc
+        return sandbox, NetworkPolicy, SandboxResources
+
+    async def get_version_async(self) -> dict[str, str]:
+        cached_value = sandbox_version_cache["value"]
+        if cached_value is not None and time.monotonic() < float(sandbox_version_cache["expires_at"]):
+            return dict(cached_value)
+        try:
+            sandbox, NetworkPolicy, SandboxResources = self._sdk()
+            async with sandbox.create_sandbox(
+                image=JAVA_SANDBOX_IMAGE,
+                execution_time_limit=10,
+                resources=SandboxResources(vcpus=1, memory=512),
+                network_policy=NetworkPolicy.deny_all(),
+                persistent=False,
+            ) as box:
+                result = await box.run_process("java", ["-version"], capture_output=True, kill_after=5)
+                version_text = f"{result.stdout}\n{result.stderr}"
+                match = re.search(r'version "([^\"]+)"', version_text)
+                if result.returncode != 0 or not match:
+                    raise RuntimeError("The configured VCR image does not contain a working Java runtime.")
+                value = {"version": match.group(1), "vendor": "OpenJDK"}
+                sandbox_version_cache.update(expires_at=time.monotonic() + 60, value=value)
+                return value
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="The Vercel Java sandbox is unavailable or its image is not ready.") from exc
+
+    def validate_project(self, request: RunRequest) -> dict[str, str]:
+        files, _ = _safe_files(request.files)
+        if not MAIN_CLASS_PATTERN.fullmatch(request.main_class):
+            raise HTTPException(status_code=422, detail="Main class must be a Java class name, such as Main.")
+        return files
+
+    async def _read_output(
+        self,
+        reader: object,
+        process: object,
+        output: bytearray,
+        total: list[int],
+        lock: asyncio.Lock,
+        truncated: asyncio.Event,
+    ) -> None:
+        if reader is None:
+            return
+        while chunk := await reader.read(8192):
+            data = chunk.encode("utf-8", errors="replace") if isinstance(chunk, str) else bytes(chunk)
+            async with lock:
+                remaining = MAX_OUTPUT_BYTES - total[0]
+                if remaining > 0:
+                    output.extend(data[:remaining])
+                    total[0] += min(len(data), remaining)
+                if len(data) > remaining:
+                    truncated.set()
+            if truncated.is_set():
+                try:
+                    await process.kill()
+                except Exception:
+                    pass
+                return
+
+    async def compile_and_run(self, request: RunRequest) -> dict[str, object]:
+        files = self.validate_project(request)
+        started = time.monotonic()
+        sandbox, NetworkPolicy, SandboxResources = self._sdk()
+        box = None
+        process = None
+        try:
+            async with sandbox.create_sandbox(
+                name=_sandbox_name(request.job_id),
+                image=JAVA_SANDBOX_IMAGE,
+                execution_time_limit=request.timeout_seconds + 5,
+                resources=SandboxResources(vcpus=1, memory=512),
+                network_policy=NetworkPolicy.deny_all(),
+                persistent=False,
+                tags={"application": "codelab", "job_id": request.job_id},
+            ) as box:
+                active_sandbox_boxes[request.job_id] = box
+                workspace = PurePosixPath("/workspace")
+                classes = workspace / ".codelab-classes"
+                await box.fs.mkdir(str(workspace), recursive=True)
+                await box.fs.mkdir(str(classes), recursive=True)
+                source_paths: list[str] = []
+                for name, source in files.items():
+                    relative = PurePosixPath(name)
+                    destination = workspace / relative
+                    await box.fs.mkdir(str(destination.parent), recursive=True)
+                    await box.fs.write_text(str(destination), source)
+                    source_paths.append(str(destination))
+                await box.fs.write_text(str(workspace / ".codelab-input"), request.stdin)
+
+                remaining = max(0.05, request.timeout_seconds - (time.monotonic() - started))
+                compile_result = await box.run_process(
+                    "timeout",
+                    ["--kill-after=0.2s", f"{remaining:.3f}s", "javac", "-encoding", "UTF-8", "-proc:none", "-d", str(classes), *source_paths],
+                    cwd=str(workspace),
+                    capture_output=True,
+                    kill_after=remaining + 1,
+                )
+                compile_output = _combined_output(
+                    str(compile_result.stdout or "").encode("utf-8"),
+                    str(compile_result.stderr or "").encode("utf-8"),
+                )
+                if request.job_id in cancelled_jobs:
+                    return {"status": "STOPPED", "output": compile_output or "Execution stopped.", "exit_code": None, "elapsed_ms": round((time.monotonic() - started) * 1000), "memory_mb": None, "diagnostics": []}
+                if compile_result.returncode == 124:
+                    return {"status": "TIME_LIMIT_EXCEEDED", "output": compile_output or "Java compilation exceeded the time limit.", "exit_code": compile_result.returncode, "elapsed_ms": round((time.monotonic() - started) * 1000), "memory_mb": None, "diagnostics": []}
+                if compile_result.returncode != 0:
+                    compile_output = compile_output[-MAX_OUTPUT_BYTES:]
+                    return {"status": "COMPILE_ERROR", "output": compile_output, "exit_code": compile_result.returncode, "elapsed_ms": round((time.monotonic() - started) * 1000), "memory_mb": None, "diagnostics": _parse_diagnostics(compile_output)}
+
+                remaining = max(0.05, request.timeout_seconds - (time.monotonic() - started))
+                command_script = 'exec timeout --kill-after=0.2s "$1" java -Xms16m -Xmx128m -Xss512k -XX:MaxMetaspaceSize=64m -XX:-UsePerfData -XX:ActiveProcessorCount=1 -cp /workspace/.codelab-classes "$2" < /workspace/.codelab-input'
+                process = await box.create_process(
+                    "/bin/sh",
+                    ["-c", command_script, "codelab-runner", f"{remaining:.3f}s", request.main_class],
+                    cwd=str(workspace),
+                    kill_after=remaining + 1,
+                )
+                active_sandbox_processes[request.job_id] = process
+                stdout = bytearray()
+                stderr = bytearray()
+                total = [0]
+                lock = asyncio.Lock()
+                truncated = asyncio.Event()
+                readers = [
+                    asyncio.create_task(self._read_output(process.stdout, process, stdout, total, lock, truncated)),
+                    asyncio.create_task(self._read_output(process.stderr, process, stderr, total, lock, truncated)),
+                ]
+                exit_code = await process.wait()
+                await asyncio.gather(*readers, return_exceptions=True)
+                output = (bytes(stdout) + bytes(stderr)).decode("utf-8", errors="replace").strip("\r\n")
+                elapsed_ms = round((time.monotonic() - started) * 1000)
+                if request.job_id in cancelled_jobs:
+                    status = "STOPPED"
+                elif truncated.is_set():
+                    status = "OUTPUT_LIMIT_EXCEEDED"
+                elif exit_code == 124 or time.monotonic() - started >= request.timeout_seconds:
+                    status = "TIME_LIMIT_EXCEEDED"
+                else:
+                    status = "SUCCESS" if exit_code == 0 else "RUNTIME_ERROR"
+                if status == "OUTPUT_LIMIT_EXCEEDED":
+                    output = f"{output}\n[CodeLab stopped this program after its 64 KB output limit.]".strip()
+                return {"status": status, "output": output, "exit_code": exit_code, "elapsed_ms": elapsed_ms, "memory_mb": None, "diagnostics": []}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            if request.job_id in cancelled_jobs:
+                return {"status": "STOPPED", "output": "Execution stopped.", "exit_code": None, "elapsed_ms": round((time.monotonic() - started) * 1000), "memory_mb": None, "diagnostics": []}
+            raise HTTPException(status_code=503, detail="The Vercel Java sandbox could not complete this execution.") from exc
+        finally:
+            active_sandbox_boxes.pop(request.job_id, None)
+            active_sandbox_processes.pop(request.job_id, None)
+            cancelled_jobs.discard(request.job_id)
+
+    async def stop(self, job_id: str) -> dict[str, str]:
+        cancelled_jobs.add(job_id)
+        process = active_sandbox_processes.get(job_id)
+        if process is not None:
+            try:
+                await process.kill()
+            except Exception:
+                pass
+            return {"status": "stop_requested"}
+        try:
+            sandbox, _, _ = self._sdk()
+            box = active_sandbox_boxes.get(job_id) or await sandbox.get_sandbox(name=_sandbox_name(job_id))
+            for process in await box.query_processes():
+                if getattr(process.status, "value", process.status) == "RUNNING":
+                    await process.kill()
+        except Exception:
+            pass
+        return {"status": "stop_requested"}
+
+    def parse_diagnostics(self, output: str) -> list[dict[str, object]]:
+        return _parse_diagnostics(output)
+
+
+if JAVA_EXECUTION_MODE not in {"docker", "local", "vercel-sandbox"}:
+    raise RuntimeError("JAVA_EXECUTION_MODE must be 'docker', 'local', or 'vercel-sandbox'.")
+
+java_runtime: LanguageRuntime = (
+    LocalJavaRuntime() if JAVA_EXECUTION_MODE == "local"
+    else VercelSandboxJavaRuntime() if JAVA_EXECUTION_MODE == "vercel-sandbox"
+    else JavaRuntime()
+)
 
 
 @app.get("/health")
@@ -565,8 +768,11 @@ async def health() -> dict[str, str]:
 @app.get("/runtime")
 async def runtime() -> dict[str, object]:
     try:
-        info = await asyncio.to_thread(java_runtime.get_version)
-        return {**info, "mode": JAVA_EXECUTION_MODE, "sandboxed": JAVA_EXECUTION_MODE == "docker"}
+        if isinstance(java_runtime, VercelSandboxJavaRuntime):
+            info = await java_runtime.get_version_async()
+        else:
+            info = await asyncio.to_thread(java_runtime.get_version)
+        return {**info, "mode": JAVA_EXECUTION_MODE, "sandboxed": JAVA_EXECUTION_MODE in {"docker", "vercel-sandbox"}}
     except HTTPException:
         raise
     except (DockerException, APIError) as exc:

@@ -7,7 +7,7 @@ import {
   Workflow, X,
 } from 'lucide-react';
 
-type Runtime = { available: boolean; language: string; version?: string; vendor?: string; mode?: 'docker' | 'local'; sandboxed?: boolean; message?: string };
+type Runtime = { available: boolean; language: string; version?: string; vendor?: string; mode?: 'docker' | 'local' | 'vercel-sandbox'; sandboxed?: boolean; message?: string };
 type Diagnostic = { file: string; line: number; column?: number | null; severity: string; code: string; message: string };
 type RunResult = { status: string; output: string; exit_code: number | null; elapsed_ms: number; memory_mb?: number | null; diagnostics: Diagnostic[] };
 type Job = { id: string; status: string; result?: RunResult; error?: string };
@@ -197,7 +197,12 @@ function App() {
         const error = await started.json().catch(() => ({}));
         throw new Error(error.detail ?? 'CodeLab API is offline. Start the complete local stack with `npm run dev`.');
       }
-      const { id } = await started.json() as { id: string };
+      const first = await started.json() as Job;
+      if (first.result && !['QUEUED', 'RUNNING'].includes(first.status)) {
+        setJob(first);
+        return;
+      }
+      const { id } = first;
       setJob({ id, status: 'QUEUED' });
       let terminal = false;
       while (!terminal) {
@@ -235,7 +240,7 @@ function App() {
     if (activeFile === name) setActiveFile('Main.java');
   };
 
-  const statusTone = result?.status === 'SUCCESS' ? 'good' : result?.status === 'COMPILE_ERROR' || result?.status === 'RUNTIME_ERROR' || result?.status === 'TIME_LIMIT_EXCEEDED' ? 'bad' : 'neutral';
+  const statusTone = result?.status === 'SUCCESS' ? 'good' : ['COMPILE_ERROR', 'RUNTIME_ERROR', 'TIME_LIMIT_EXCEEDED', 'OUTPUT_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED'].includes(result?.status ?? '') ? 'bad' : 'neutral';
   const filteredFiles = Object.keys(files).filter((name) => name.toLowerCase().includes(filter.toLowerCase()));
 
   return (
@@ -248,7 +253,7 @@ function App() {
 
       <div className="actionbar">
         <div className="action-left"><div className="language-pill"><span className="java-glyph">J</span><span>Java</span><ChevronDown size={13} /></div><span className="divider" /><button className="bar-button" onClick={() => setCollapsed((value) => !value)} title="Toggle explorer"><PanelLeftClose size={16} /><span>Explorer</span></button><button className="bar-button" onClick={() => setShowSearch((value) => !value)} title="Search files"><Search size={16} /><span>Search</span></button></div>
-        <div className="action-right"><span className={`runtime-chip ${runtime.available ? 'online' : ''}`}><span className="runtime-dot" />{runtime.available ? `${runtime.sandboxed ? 'Sandbox' : 'Local'} · ${runtime.vendor} ${runtime.version}` : runtime.message ?? 'Java runner offline'}</span><button className="bar-button settings-button" title="Settings"><Settings2 size={16} /></button><button className="run-button" onClick={() => void runCode()} disabled={busy}><Play size={15} fill="currentColor" />{busy ? 'Running' : 'Run'}<kbd>{isMacPlatform ? '⌘ ↵' : 'Ctrl ↵'}</kbd></button>{busy && <button className="stop-button" onClick={() => void stopCode()} title="Stop execution"><Square size={14} fill="currentColor" /></button>}</div>
+        <div className="action-right"><span className={`runtime-chip ${runtime.available ? 'online' : ''}`}><span className="runtime-dot" />{runtime.available ? `${runtime.sandboxed ? runtime.mode === 'vercel-sandbox' ? 'Vercel Sandbox' : 'Sandbox' : 'Local'} · ${runtime.vendor} ${runtime.version}` : runtime.message ?? 'Java runner offline'}</span><button className="bar-button settings-button" title="Settings"><Settings2 size={16} /></button><button className="run-button" onClick={() => void runCode()} disabled={busy}><Play size={15} fill="currentColor" />{busy ? 'Running' : 'Run'}<kbd>{isMacPlatform ? '⌘ ↵' : 'Ctrl ↵'}</kbd></button>{busy && job?.id && <button className="stop-button" onClick={() => void stopCode()} title="Stop execution"><Square size={14} fill="currentColor" /></button>}</div>
       </div>
 
       <section className={`workbench ${collapsed ? 'explorer-collapsed' : ''}`}>
@@ -272,7 +277,7 @@ function App() {
           <div className="inspector-content">
             <div className="run-card"><div className="run-card-icon"><TerminalSquare size={17} /></div><div><div className="run-card-title">Java program</div><div className="run-card-subtitle">{runtime.sandboxed ? 'Compile and run in isolation' : 'Compile with the installed JDK'}</div></div><span className={`ready-indicator ${runtime.available ? 'online' : ''}`} title={runtime.available ? runtime.sandboxed ? 'Sandbox ready' : 'Local JDK ready' : runtime.message} /></div>
             <div className="config-section"><div className="config-label">ENTRY POINT</div><div className="config-value"><Braces size={15} /><span>{entryPointName}</span><span className="config-auto">AUTO</span></div></div>
-            <div className="config-section"><div className="config-label">LANGUAGE RUNTIME</div><div className="version-card"><span className="version-symbol">☕</span><div className="version-copy"><strong>{runtime.available ? `${runtime.vendor} ${runtime.version}` : 'Java runtime'}</strong><span>{runtime.available ? runtime.sandboxed ? 'Docker sandbox · isolated' : 'Local JDK · runs on this computer' : runtime.message ?? 'Waiting for runner'}</span></div></div></div>
+            <div className="config-section"><div className="config-label">LANGUAGE RUNTIME</div><div className="version-card"><span className="version-symbol">☕</span><div className="version-copy"><strong>{runtime.available ? `${runtime.vendor} ${runtime.version}` : 'Java runtime'}</strong><span>{runtime.available ? runtime.sandboxed ? runtime.mode === 'vercel-sandbox' ? 'Vercel Sandbox · isolated' : 'Docker sandbox · isolated' : 'Local JDK · runs on this computer' : runtime.message ?? 'Waiting for runner'}</span></div></div></div>
             <div className="security-note"><div className="security-icon"><Gauge size={15} /></div><div><strong>{runtime.sandboxed ? 'Sandboxed execution' : runtime.available ? 'Local Java execution' : 'Java runner setup'}</strong><span>{runtime.sandboxed ? 'No network · CPU and memory limits · 5s timeout' : runtime.available ? 'Runs with your account permissions. Only execute code you trust.' : runtime.message ?? 'Start the Java runner to compile and run code.'}</span></div></div>
             <div className="shortcut-card"><div className="shortcut-title"><Clock3 size={14} /> QUICK TIP</div><p>Pass values through standard input. Your Java program can read them with <code>Scanner</code> or <code>BufferedReader</code>.</p><button onClick={() => setActiveTerminal('Input')}>Edit input <ChevronRight size={13} /></button></div>
             <div className="mentor-placeholder"><div className="mentor-orb"><Code2 size={17} /></div><div><strong>Build, run, learn.</strong><span>More tools are on the way.</span></div></div>

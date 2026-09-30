@@ -81,12 +81,12 @@ Docker Compose builds the Java runtime and starts the web app, API, and runner. 
 
 ## Public deployment
 
-Vercel can host the static editor; Java execution for this configuration runs on a Linux VM with Docker Engine. See [docs/deploy-vercel.md](docs/deploy-vercel.md) for the frontend and API setup. A Vercel-only deployment does not run Java with the current Docker-backed runner. The browser calls the API host directly over HTTPS. Configure its allowed browser origins before opening the service publicly.
+The root `vercel.json` configures the Vite editor, FastAPI API, and internal Java runner as Vercel Services. Java code runs in a network-disabled Vercel Sandbox microVM using a custom OpenJDK image in Vercel Container Registry. Follow [docs/deploy-vercel.md](docs/deploy-vercel.md) to build that image, configure the Vercel project, and deploy all services.
 
-The current API keeps jobs in memory, so deploy one API replica. Each visitor has a separate browser-local workspace; there are no shared projects, sign-in, or cross-device sync in this version.
+The local development queue keeps jobs in memory. The Vercel deployment uses a synchronous request flow and does not depend on that queue. Each visitor has a separate browser-local workspace; there are no shared projects, sign-in, or cross-device sync in this version.
 
 ## Project docs
 
 - [Compiler workflow](docs/compiler-workflow.md)
 - [Architecture and runtime contract](docs/architecture.md)
-- [Vercel frontend and Linux runner setup](docs/deploy-vercel.md)
+- [Vercel multi-service deployment](docs/deploy-vercel.md)

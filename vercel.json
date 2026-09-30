@@ -1,12 +1,73 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "npm install",
-  "buildCommand": "npm run build",
-  "outputDirectory": "apps/web/dist",
+  "services": {
+    "api": {
+      "root": "apps/api",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app",
+      "functions": {
+        "app/main.py": {
+          "maxDuration": 120
+        }
+      },
+      "bindings": [
+        {
+          "type": "service",
+          "service": "java-runner",
+          "format": "url",
+          "env": "JAVA_RUNNER_URL"
+        }
+      ]
+    },
+    "web": {
+      "root": "apps/web",
+      "framework": "vite",
+      "installCommand": "npm install",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist"
+    },
+    "java-runner": {
+      "root": "services/java-runner",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app",
+      "functions": {
+        "app/main.py": {
+          "maxDuration": 60
+        }
+      }
+    }
+  },
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "api"
+      }
+    },
+    {
+      "source": "/assets/(.*)",
+      "destination": {
+        "service": "web"
+      }
+    },
+    {
+      "source": "/asrvone-logo.svg",
+      "destination": {
+        "service": "web"
+      }
+    },
+    {
+      "source": "/asrvone-logo-light.svg",
+      "destination": {
+        "service": "web"
+      }
+    },
+    {
       "source": "/(.*)",
-      "destination": "/index.html"
+      "destination": {
+        "service": "web",
+        "path": "/index.html"
+      }
     }
   ]
 }
