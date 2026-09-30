@@ -1,0 +1,72 @@
+services:
+  java-runtime:
+    image: codelab-java:25
+    build:
+      context: ./services/java-runtime
+    command: ["/bin/sh", "-c", "while :; do sleep 3600; done"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "java", "-version"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  java-runner:
+    build:
+      context: ./services/java-runner
+    environment:
+      JAVA_IMAGE: codelab-java:25
+      EXECUTION_TIMEOUT_SECONDS: ${EXECUTION_TIMEOUT_SECONDS:-5}
+      EXECUTION_MEMORY_LIMIT: ${EXECUTION_MEMORY_LIMIT:-256m}
+      EXECUTION_CPU_LIMIT: ${EXECUTION_CPU_LIMIT:-1.0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      java-runtime:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      JAVA_RUNNER_URL: http://java-runner:8100
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-4}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS to your Vercel site origin}
+    expose:
+      - "8000"
+    depends_on:
+      java-runner:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN to the public API domain}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

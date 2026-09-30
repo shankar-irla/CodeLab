@@ -1,0 +1,59 @@
+services:
+  java-runtime:
+    image: codelab-java:25
+    build:
+      context: ./services/java-runtime
+    command: ["/bin/sh", "-c", "while :; do sleep 3600; done"]
+    healthcheck:
+      test: ["CMD", "java", "-version"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  java-runner:
+    build:
+      context: ./services/java-runner
+    environment:
+      JAVA_IMAGE: codelab-java:25
+      EXECUTION_TIMEOUT_SECONDS: ${EXECUTION_TIMEOUT_SECONDS:-5}
+      EXECUTION_MEMORY_LIMIT: ${EXECUTION_MEMORY_LIMIT:-256m}
+      EXECUTION_CPU_LIMIT: ${EXECUTION_CPU_LIMIT:-1.0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      java-runtime:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      JAVA_RUNNER_URL: http://java-runner:8100
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-4}
+    depends_on:
+      java-runner:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      API_INTERNAL_URL: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:5173"
