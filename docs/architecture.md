@@ -31,7 +31,7 @@ The browser saves the current user's files, standard input, and theme in local s
 ## Next phases
 
 1. Persist users, projects, files, problems, executions, and submissions with PostgreSQL and SQLAlchemy.
-2. Extend the browser explorer to nested folders and full create/rename/move/delete workflows.
+2. Add drag-and-drop file moves and multi-select operations to the nested browser explorer.
 3. Add a problem schema, sample/hidden test runner, and submission statuses on top of the runtime contract.
 4. Add a structured Java visualization event helper and a step player.
 5. Add provider-neutral AI interfaces only when credentials are configured; code execution remains independent of AI availability.

@@ -55,7 +55,7 @@ Open [http://localhost:5173](http://localhost:5173). The runtime badge shows the
 
 ## Compile and run a program
 
-1. Open a `.java` file in Explorer, or add one with **New Java file**.
+1. Rename the project from its workspace breadcrumb. Use Explorer to create nested folders and Java files, then rename or delete entries as the project changes.
 2. Write a class with `public static void main(String[] args)`. CodeLab runs the active file when it contains `main`; otherwise it selects `Main.java`, then the first file containing `main`.
 3. Select **Input** and type the lines your program reads from `System.in` with `Scanner` or `BufferedReader`.
 4. Select **Run** or press **Ctrl+Enter** ( **Cmd+Enter** on macOS) to compile and execute the selected program.
