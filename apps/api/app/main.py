@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -44,6 +44,14 @@ def runner_url() -> str:
     if os.getenv("VERCEL"):
         raise HTTPException(status_code=503, detail="The Java runner service binding is not available.")
     return "http://localhost:8100"
+
+
+def runner_auth_headers(request: Request) -> dict[str, str] | None:
+    """Forward Vercel's signed OIDC token to the internal Sandbox runner."""
+    if not os.getenv("VERCEL"):
+        return None
+    token = request.headers.get("x-vercel-oidc-token")
+    return {"x-vercel-oidc-token": token} if token else None
 
 
 class RunRequest(BaseModel):
@@ -119,11 +127,11 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/api/runtime")
-async def runtime() -> dict[str, Any]:
+async def runtime(request: Request) -> dict[str, Any]:
     try:
         timeout = 20 if os.getenv("VERCEL") else 4
         async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(f"{runner_url()}/runtime")
+            response = await client.get(f"{runner_url()}/runtime", headers=runner_auth_headers(request))
         if response.is_error:
             try:
                 message = response.json().get("detail", "Java runner is unavailable")
@@ -136,7 +144,7 @@ async def runtime() -> dict[str, Any]:
 
 
 @app.post("/api/run")
-async def create_run(payload: RunRequest) -> Any:
+async def create_run(payload: RunRequest, request: Request) -> Any:
     _validate_request(payload)
     if os.getenv("VERCEL"):
         job_id = str(uuid4())
@@ -144,6 +152,7 @@ async def create_run(payload: RunRequest) -> Any:
             async with httpx.AsyncClient(timeout=payload.timeout_seconds + 30) as client:
                 response = await client.post(
                     f"{runner_url()}/run",
+                    headers=runner_auth_headers(request),
                     json={
                         "job_id": job_id,
                         "files": payload.files,
