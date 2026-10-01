@@ -12,12 +12,14 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 
 import docker
 from docker.errors import APIError, DockerException, NotFound
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="CodeLab Java Runner", version="0.1.0")
@@ -562,6 +564,18 @@ active_sandbox_processes: dict[str, object] = {}
 sandbox_version_cache: dict[str, object] = {"expires_at": 0.0, "value": None}
 
 
+@asynccontextmanager
+async def _vercel_sdk_session(headers: Mapping[str, str] | None) -> AsyncIterator[None]:
+    """Register this request's Vercel OIDC headers for Sandbox SDK calls."""
+    from vercel.api import session
+    from vercel.headers import set_headers
+
+    if headers is not None:
+        set_headers(headers)
+    async with session():
+        yield
+
+
 class VercelSandboxJavaRuntime:
     """Runs each public Java submission in its own network-disabled Vercel microVM."""
 
@@ -598,7 +612,15 @@ class VercelSandboxJavaRuntime:
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=503, detail="The Vercel Java sandbox is unavailable or its image is not ready.") from exc
+            local_logger.exception(
+                "Vercel Java runtime health check failed (image=%s, error_type=%s).",
+                JAVA_SANDBOX_IMAGE,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="The Vercel Java sandbox is unavailable. Check Sandbox authentication and that JAVA_SANDBOX_IMAGE is Ready in Vercel Container Registry.",
+            ) from exc
 
     def validate_project(self, request: RunRequest) -> dict[str, str]:
         files, _ = _safe_files(request.files)
@@ -721,7 +743,16 @@ class VercelSandboxJavaRuntime:
         except Exception as exc:
             if request.job_id in cancelled_jobs:
                 return {"status": "STOPPED", "output": "Execution stopped.", "exit_code": None, "elapsed_ms": round((time.monotonic() - started) * 1000), "memory_mb": None, "diagnostics": []}
-            raise HTTPException(status_code=503, detail="The Vercel Java sandbox could not complete this execution.") from exc
+            local_logger.exception(
+                "Vercel Java execution failed (image=%s, error_type=%s, job_id=%s).",
+                JAVA_SANDBOX_IMAGE,
+                type(exc).__name__,
+                request.job_id,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="The Vercel Java sandbox could not complete this execution. Check Sandbox authentication and that JAVA_SANDBOX_IMAGE is Ready in Vercel Container Registry.",
+            ) from exc
         finally:
             active_sandbox_boxes.pop(request.job_id, None)
             active_sandbox_processes.pop(request.job_id, None)
@@ -766,10 +797,11 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/runtime")
-async def runtime() -> dict[str, object]:
+async def runtime(http_request: Request) -> dict[str, object]:
     try:
         if isinstance(java_runtime, VercelSandboxJavaRuntime):
-            info = await java_runtime.get_version_async()
+            async with _vercel_sdk_session(http_request.headers):
+                info = await java_runtime.get_version_async()
         else:
             info = await asyncio.to_thread(java_runtime.get_version)
         return {**info, "mode": JAVA_EXECUTION_MODE, "sandboxed": JAVA_EXECUTION_MODE in {"docker", "vercel-sandbox"}}
@@ -780,10 +812,16 @@ async def runtime() -> dict[str, object]:
 
 
 @app.post("/run")
-async def run(request: RunRequest) -> dict[str, object]:
+async def run(request: RunRequest, http_request: Request) -> dict[str, object]:
+    if isinstance(java_runtime, VercelSandboxJavaRuntime):
+        async with _vercel_sdk_session(http_request.headers):
+            return await java_runtime.compile_and_run(request)
     return await java_runtime.compile_and_run(request)
 
 
 @app.post("/stop/{job_id}")
-async def stop(job_id: str) -> dict[str, str]:
+async def stop(job_id: str, http_request: Request) -> dict[str, str]:
+    if isinstance(java_runtime, VercelSandboxJavaRuntime):
+        async with _vercel_sdk_session(http_request.headers):
+            return await java_runtime.stop(job_id)
     return await java_runtime.stop(job_id)

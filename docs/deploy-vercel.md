@@ -41,8 +41,18 @@ Open the local URL printed by Vercel. The service binding is injected locally; t
 - Vercel requests execute synchronously through the API and runner functions. The local `npm run dev` flow retains its in-memory job queue and polling behavior.
 - Each Vercel Java run creates a disposable microVM with one vCPU, 512 MB memory, denied outbound network access, and the requested run timeout. Standard input is written to a temporary file and passed to `System.in`; output is capped at 64 KB.
 - Java execution on Vercel requires Vercel Sandbox access and a VCR image that is **Ready**. The Vercel SDK cannot run the existing Docker daemon-backed mode inside a Vercel Function.
+- The Java runner registers the incoming `x-vercel-oidc-token` request headers with the Vercel Python SDK before making Sandbox API calls. The token is supplied by Vercel at runtime; do not copy it into project environment variables.
 - Each visitor's files and input remain in that visitor's browser local storage. CodeLab does not provide accounts, shared projects, or cross-device sync.
 - Public runs are anonymous and consume Sandbox resources. Configure suitable Vercel usage limits and add shared rate limiting before promoting the compiler to high-volume public use.
+
+## Troubleshooting a deployed runner
+
+Open `/api/runtime` on the deployed domain. It should return `"available": true` and the Java version. If it returns `"available": false`, check the Java runner's Vercel function logs and verify both of these deployment prerequisites:
+
+1. Vercel Sandbox is enabled for the project and the deployment is receiving Vercel's OIDC request header.
+2. `codelab-java:latest` (or the value configured as `JAVA_SANDBOX_IMAGE`) is **Ready** in the same Vercel project's Container Registry.
+
+The editor now shows these checks in the runtime status and returns actionable runner errors instead of displaying an old execution result after the standard input changes. A static frontend deployment by itself cannot compile Java; the API, internal runner service, Vercel Sandbox access, and ready JDK image must all be present.
 
 ## Route and binding map
 
