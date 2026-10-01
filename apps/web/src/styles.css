@@ -89,10 +89,11 @@ button { color: inherit; }
 .theme-light .divider { background: #dce2e8; }
 .app-footer-meta { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .powered-by-label { color: #858b96; font-size: 8px; letter-spacing: .2px; }
-.asrvone-logo { display: block; width: 70px; height: 20px; object-fit: contain; }
+.asrvone-wordmark { display: inline-flex; align-items: center; white-space: nowrap; color: #f5f4ef; font-size: 10px; font-weight: 800; text-shadow: 0 1px 2px #0008; }
+.asrvone-wordmark strong { color: #f4c322; font-weight: 900; }
 .footer-shortcut { margin-left: 8px; padding-left: 10px; border-left: 1px solid #272c33; }
 .theme-light .footer-shortcut { border-color: #dce2e8; }
-@media (max-width: 780px) { .app-footer-meta { gap: 5px; }.asrvone-logo { width: 63px; height: 18px; }.footer-shortcut { margin-left: 4px; padding-left: 7px; } }
+@media (max-width: 780px) { .app-footer-meta { gap: 5px; }.footer-shortcut { margin-left: 4px; padding-left: 7px; } }
 
 .app-shell { grid-template-rows: 54px 52px minmax(320px,1fr) 6px var(--terminal-height,254px) 29px; }
 .workbench { grid-template-columns: var(--explorer-width,208px) 6px minmax(300px,1fr) 6px var(--inspector-width,240px); }
@@ -159,12 +160,16 @@ button { color: inherit; }
 .about-workflow kbd { padding: 1px 5px; border: 1px solid #3a414c; border-radius: 4px; color: #d9dee6; background: #20252d; font: 9px 'DM Sans',sans-serif; }
 .about-author { display: flex; gap: 13px; margin-top: 17px; padding: 16px 2px 14px; border-bottom: 1px solid #282e36; }
 .about-author-mark { flex: 0 0 38px; height: 38px; display: grid; place-items: center; border: 1px solid #3a5a45; border-radius: 50%; color: #bdf1ca; background: #1b2b21; font-weight: 700; }
+.about-author-info { min-width: 0; }
 .about-author h2 { margin-top: 4px; font-size: 14px; }
-.about-author p { margin: 7px 0 8px; color: #9da6b2; font-size: 11px; line-height: 1.6; }
+.about-author p { margin: 7px 0; color: #9da6b2; font-size: 11px; line-height: 1.6; }
+.about-author p strong { color: #dce3eb; font-weight: 600; }
 .about-author a { display: inline-flex; align-items: center; gap: 4px; color: #a8e6ba; font-size: 10px; text-decoration: none; }
 .about-author a:hover { text-decoration: underline; }
+.about-author-quote { margin: 9px 0; padding-left: 9px; border-left: 2px solid #e6bd49; color: #e5d9ae; font-size: 11px; font-style: italic; line-height: 1.5; }
+.about-author-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 9px; color: #9da6b2; font-size: 10px; }
 .about-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 13px; color: #858e99; font-size: 9px; }
-.about-footer img { width: 72px; height: 21px; object-fit: contain; }
+.about-footer .asrvone-wordmark { font-size: 11px; }
 .theme-light .about-dialog { color: #34404d; border-color: #dce2e9; background: linear-gradient(150deg,#fff,#f7f9fb 70%); box-shadow: 0 24px 90px #26374833; }
 .theme-light .about-heading h1,.theme-light .about-workflow h2,.theme-light .about-author h2 { color: #26323e; }
 .theme-light .about-eyebrow,.theme-light .about-footer { color: #74808e; }
@@ -175,6 +180,9 @@ button { color: inherit; }
 .theme-light .about-author { border-color: #e1e6eb; }
 .theme-light .about-author-mark { color: #286b40; border-color: #cfe6d5; background: #e7f4eb; }
 .theme-light .about-author a { color: #25804a; }
+.theme-light .about-author p strong { color: #364351; }
+.theme-light .about-author-quote { color: #6b5414; border-color: #d99f00; }
+.theme-light .about-author-links { color: #657281; }
 @media (max-width: 520px) { .about-backdrop { padding: 12px; }.about-dialog { padding: 19px; border-radius: 11px; }.about-heading h1 { font-size: 20px; } }
 
 @media (max-width: 780px) {

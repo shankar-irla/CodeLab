@@ -6,9 +6,10 @@ The root [`vercel.json`](../vercel.json) defines three Vercel Services. The edit
 
 The Vercel managed Sandbox images do not include a JDK. This repository includes an Ubuntu image with OpenJDK 21 at [`services/java-runner/sandbox-image/Dockerfile`](../services/java-runner/sandbox-image/Dockerfile).
 
-Install Docker Desktop or another OCI builder, install the Vercel CLI, then run these commands from the CodeLab repository root:
+Install Docker Desktop or another OCI builder, and install or upgrade the Vercel CLI to a current release. Older releases, including 54.17.1, do not include the `vcr` command. Confirm that `vercel vcr --help` works, then run these commands from the CodeLab repository root:
 
 ```sh
+vercel upgrade
 vercel link
 vercel vcr login docker
 vercel vcr build docker services/java-runner/sandbox-image codelab-java:latest --push

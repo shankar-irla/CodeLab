@@ -597,7 +597,7 @@ class VercelSandboxJavaRuntime:
             async with sandbox.create_sandbox(
                 image=JAVA_SANDBOX_IMAGE,
                 execution_time_limit=10,
-                resources=SandboxResources(vcpus=1, memory=512),
+                resources=SandboxResources(vcpus=1, memory=2048),
                 network_policy=NetworkPolicy.deny_all(),
                 persistent=False,
             ) as box:
@@ -666,7 +666,7 @@ class VercelSandboxJavaRuntime:
                 name=_sandbox_name(request.job_id),
                 image=JAVA_SANDBOX_IMAGE,
                 execution_time_limit=request.timeout_seconds + 5,
-                resources=SandboxResources(vcpus=1, memory=512),
+                resources=SandboxResources(vcpus=1, memory=2048),
                 network_policy=NetworkPolicy.deny_all(),
                 persistent=False,
                 tags={"application": "codelab", "job_id": request.job_id},
@@ -712,20 +712,19 @@ class VercelSandboxJavaRuntime:
                     ["-c", command_script, "codelab-runner", f"{remaining:.3f}s", request.main_class],
                     cwd=str(workspace),
                     kill_after=remaining + 1,
+                    stderr=subprocess.STDOUT,
                 )
                 active_sandbox_processes[request.job_id] = process
                 stdout = bytearray()
-                stderr = bytearray()
                 total = [0]
                 lock = asyncio.Lock()
                 truncated = asyncio.Event()
                 readers = [
                     asyncio.create_task(self._read_output(process.stdout, process, stdout, total, lock, truncated)),
-                    asyncio.create_task(self._read_output(process.stderr, process, stderr, total, lock, truncated)),
                 ]
                 exit_code = await process.wait()
                 await asyncio.gather(*readers, return_exceptions=True)
-                output = (bytes(stdout) + bytes(stderr)).decode("utf-8", errors="replace").strip("\r\n")
+                output = bytes(stdout).decode("utf-8", errors="replace").strip("\r\n")
                 elapsed_ms = round((time.monotonic() - started) * 1000)
                 if request.job_id in cancelled_jobs:
                     status = "STOPPED"
