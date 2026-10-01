@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
+import type { editor as MonacoEditor, languages as MonacoLanguages, Range as MonacoRange } from 'monaco-editor';
 import {
   Activity, Braces, ChevronDown, ChevronRight, CircleHelp, Clock3, Code2, FileCode2,
   FilePlus2, Folder, Gauge, GitBranch, Layers3, Maximize2, MoreHorizontal, PanelLeftClose, Pencil,
@@ -250,6 +251,29 @@ function App() {
     monaco.editor.setTheme(theme === 'light' ? 'codelab-light' : 'codelab-dark');
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => { void runCodeRef.current(); });
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => { localStorage.setItem('codelab.files', JSON.stringify(files)); });
+    const codeActionProvider: Parameters<typeof monaco.languages.registerCodeActionProvider>[1] = {
+      provideCodeActions(model: MonacoEditor.ITextModel, _range: MonacoRange, context: MonacoLanguages.CodeActionContext) {
+        const actions = context.markers.flatMap((marker) => {
+          if (marker.message !== "';' expected") return [];
+          const line = marker.startLineNumber;
+          const column = Math.min(marker.startColumn, model.getLineMaxColumn(line));
+          return [{
+            title: 'Add missing semicolon',
+            kind: monaco.languages.CodeActionKind.QuickFix,
+            diagnostics: [marker],
+            isPreferred: true,
+            edit: {
+              edits: [{
+                resource: model.uri,
+                textEdit: { range: new monaco.Range(line, column, line, column), text: ';' },
+              }],
+            },
+          }];
+        });
+        return { actions, dispose() {} };
+      },
+    };
+    monaco.languages.registerCodeActionProvider('java', codeActionProvider);
   };
 
   useEffect(() => {
@@ -514,12 +538,62 @@ function App() {
         <span className="footer-product"><span className="footer-live" /> CodeLab Preview</span>
         <div className="app-footer-meta">
           <span className="powered-by-label">Powered by</span>
-          <img className="asrvone-logo" src={theme === 'dark' ? '/asrvone-logo.svg' : '/asrvone-logo-light.svg'} alt="ASRVOne Shankar" />
+          <span className="asrvone-wordmark" aria-label="ASRV ONE"><span>ASRV</span><strong> ONE</strong></span>
           <span className="footer-shortcut"><CircleHelp size={12} /> {runShortcut} to run</span>
         </div>
       </footer>
 
-      {aboutOpen && <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAboutOpen(false); }}><section className="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title"><div className="about-heading"><div><span className="about-eyebrow">JAVA WORKSPACE</span><h1 id="about-title">About CodeLab</h1></div><button className="about-close icon-button" onClick={() => setAboutOpen(false)} aria-label="Close About CodeLab"><X size={18} /></button></div><p className="about-intro">A focused place to write, compile, and run Java programs, with standard input and compiler diagnostics beside your code.</p><div className="about-workflow"><h2>Compiler workflow</h2><ol><li>Choose the Java files in your workspace; CodeLab finds the active main class.</li><li>Add values in <strong>Input</strong> for <code>Scanner</code> or <code>BufferedReader</code>.</li><li>Select <strong>Run</strong> or press <kbd>{isMacPlatform ? 'Cmd' : 'Ctrl'}</kbd> + <kbd>Enter</kbd>.</li><li>Review program output or jump to compiler errors in <strong>Problems</strong>.</li></ol></div><div className="about-author"><div className="about-author-mark">S</div><div><span className="about-eyebrow">BUILT BY</span><h2>I G Siva Shankar</h2><p>Full-stack developer and AI/ML learner pursuing Computer Science (Data Science) at CMR Engineering College, with additional AI/ML studies at IIIT Hyderabad.</p><a href="https://shankar-irla.vercel.app/" target="_blank" rel="noreferrer">Visit author portfolio <ChevronRight size={14} /></a></div></div><div className="about-footer"><span>CodeLab · Java compiler workspace</span><img src={theme === 'dark' ? '/asrvone-logo.svg' : '/asrvone-logo-light.svg'} alt="ASRVOne Shankar" /></div></section></div>}
+      {aboutOpen && (
+        <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAboutOpen(false); }}>
+          <section className="about-dialog" role="dialog" aria-modal="true" aria-labelledby="about-title">
+            <div className="about-heading">
+              <div><span className="about-eyebrow">JAVA WORKSPACE</span><h1 id="about-title">About CodeLab</h1></div>
+              <button className="about-close icon-button" onClick={() => setAboutOpen(false)} aria-label="Close About CodeLab"><X size={18} /></button>
+            </div>
+            <p className="about-intro">A focused place to write, compile, and run Java programs, with standard input and compiler diagnostics beside your code.</p>
+            <div className="about-workflow">
+              <h2>Compiler workflow</h2>
+              <ol>
+                <li>Choose the Java files in your workspace; CodeLab finds the active main class.</li>
+                <li>Add values in <strong>Input</strong> for <code>Scanner</code> or <code>BufferedReader</code>.</li>
+                <li>Select <strong>Run</strong> or press <kbd>{isMacPlatform ? 'Cmd' : 'Ctrl'}</kbd> + <kbd>Enter</kbd>.</li>
+                <li>Review program output or jump to compiler errors in <strong>Problems</strong>.</li>
+              </ol>
+            </div>
+            <div className="about-author">
+              <div className="about-author-mark">S</div>
+              <div className="about-author-info">
+                <span className="about-eyebrow">BUILT BY</span>
+                <h2>I G Siva Shankar</h2>
+                <p>Full-stack developer and AI/ML learner pursuing Computer Science (Data Science) at CMR Engineering College, with additional AI/ML studies at IIIT Hyderabad.</p>
+                <a href="https://shankar-irla.vercel.app/" target="_blank" rel="noreferrer">Visit author portfolio <ChevronRight size={14} /></a>
+              </div>
+            </div>
+            <div className="about-author">
+              <div className="about-author-mark">V</div>
+              <div className="about-author-info">
+                <span className="about-eyebrow">BUILT BY</span>
+                <h2>Vivek Chittibothula</h2>
+                <p>I'm a Computer Science (Data Science) student at CMR Engineering College who likes turning ideas into tools people can use. My work spans full-stack apps and AI/ML, with projects in education, workplace systems, and interview practice.</p>
+                <p><strong>Focus:</strong> Java, Python, React, Node.js, SQL, machine learning, computer vision, and generative AI. <strong>Education:</strong> B.Tech CSE (Data Science), CMR Engineering College.</p>
+                <p><strong>Projects:</strong> IgniteED, Employee Attendance &amp; Payroll System, and AI Interview Coach.</p>
+                <blockquote className="about-author-quote">"I learn by building, and build to make ideas useful."</blockquote>
+                <div className="about-author-links">
+                  <a href="https://vivek-ch-portfolio.vercel.app/" target="_blank" rel="noreferrer">Visit my portfolio <ChevronRight size={13} /></a>
+                  <a href="mailto:248R5A6706@gmail.com">Email</a>
+                  <a href="https://linkedin.com/in/vivekchittibothula" target="_blank" rel="noreferrer">LinkedIn</a>
+                  <a href="https://github.com/VivekChittibothula" target="_blank" rel="noreferrer">GitHub</a>
+                  <span>Medchal, Telangana, India</span>
+                </div>
+              </div>
+            </div>
+            <div className="about-footer">
+              <span>CodeLab · Java compiler workspace</span>
+              <span className="asrvone-wordmark" aria-label="ASRV ONE"><span>ASRV</span><strong> ONE</strong></span>
+            </div>
+          </section>
+        </div>
+      )}
       {projectDialogOpen && <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setProjectDialogOpen(false); }}><form className="path-dialog" role="dialog" aria-modal="true" aria-labelledby="project-dialog-title" onSubmit={saveProjectName}><div className="path-dialog-heading"><h2 id="project-dialog-title">Rename project</h2><button className="icon-button" type="button" aria-label="Close dialog" onClick={() => setProjectDialogOpen(false)}><X size={17} /></button></div><label htmlFor="project-name">Project name</label><input id="project-name" autoFocus maxLength={48} value={projectNameDraft} onChange={(event) => { setProjectNameDraft(event.target.value); setProjectNameError(''); }} />{projectNameError && <div className="dialog-error" role="alert">{projectNameError}</div>}<div className="path-dialog-actions"><button type="button" onClick={() => setProjectDialogOpen(false)}>Cancel</button><button type="submit">Save name</button></div></form></div>}
       {pathDialog && <div className="about-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPathDialog(null); }}><form className="path-dialog" role="dialog" aria-modal="true" aria-labelledby="path-dialog-title" onSubmit={(event) => { event.preventDefault(); submitPathDialog(); }}><div className="path-dialog-heading"><h2 id="path-dialog-title">{pathDialog.kind === 'folder' ? 'New folder' : pathDialog.kind === 'file' ? 'Rename Java file' : 'Rename folder'}</h2><button className="icon-button" type="button" aria-label="Close dialog" onClick={() => setPathDialog(null)}><X size={17} /></button></div><label htmlFor="workspace-path">{pathDialog.kind === 'folder' ? 'Folder path' : pathDialog.kind === 'file' ? 'Java file path' : 'Folder path'}</label><input id="workspace-path" autoFocus value={pathDialog.value} onChange={(event) => { setPathDialog({ ...pathDialog, value: event.target.value }); setPathError(''); }} />{pathError && <div className="dialog-error" role="alert">{pathError}</div>}<div className="path-dialog-actions"><button type="button" onClick={() => setPathDialog(null)}>Cancel</button><button type="submit">{pathDialog.kind === 'folder' ? 'Create folder' : 'Rename'}</button></div></form></div>}
     </main>
